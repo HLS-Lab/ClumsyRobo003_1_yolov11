@@ -61,16 +61,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --ignore-installed is needed because numpy is pre-installed via apt and cannot
 # be uninstalled by pip (RECORD file not found).
 
-# CRITICAL: Install CPU-only PyTorch FIRST to avoid downloading CUDA dependencies.
-# The RPi4 has no NVIDIA GPU, so we use the CPU-only wheel from pytorch.org.
 RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed \
-    torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-# Install ultralytics WITHOUT torch (already installed above)
-# --ignore-installed needed for scipy conflict with system package
-RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed \
+    # Ultralytics for YOLOv11
     ultralytics \
+    # Setuptools for Python package management
     setuptools \
+    # Wheel for building Python packages
     wheel
 
 # -----------------------------------------------------------------------------

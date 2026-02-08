@@ -1,13 +1,17 @@
+# =============================================================================
 # YOLO Node Parameters
-# Configuration file for yolo_rpi_core
+# =============================================================================
+# Default configuration for yolo_rpi_core node
+# Target: Raspberry Pi 4 (CPU-only inference)
+# =============================================================================
 
 yolo_node:
   ros__parameters:
-    # Path to YOLO model file (will download if not present)
+    # Path to YOLO model file (will be downloaded if not exists)
     model_path: "yolo11n.pt"
 
-    # Device for inference: "cpu" for RPi4, "cuda" for GPU
+    # Inference device: "cpu" for RPi4, "cuda" for GPU systems
     device: "cpu"
 
-    # Minimum confidence threshold for detections (0.0 - 1.0)
+    # Confidence threshold for detections (0.0 - 1.0)
     conf_threshold: 0.5
