@@ -27,8 +27,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-# Import shared TrackedObject dataclass from tracker_node
-from yolo_rpi_core.tracker_node import TrackedObject
+# Import shared TrackedObject dataclass
+from yolo_rpi_core.tracked_object import TrackedObject
 
 
 # =============================================================================
