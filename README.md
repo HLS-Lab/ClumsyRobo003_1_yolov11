@@ -122,7 +122,22 @@ Detected 4 objects
 
 ---
 
-### Test 2: Object Tracking Integration (Internal Pipeline)
+### Test 2: PC Webcam Tracking Pipeline (No ROS 2 needed)
+
+**What this does:** Tests the YOLO model and ByteTrack tracking algorithm directly using your PC's webcam. It works on Windows, Linux, and macOS natively without needing to start the Docker container or ROS 2. It automatically attempts to use connected USB cameras first before falling back to the built-in webcam.
+
+**Run this on your host machine (with `uv` installed):**
+
+```bash
+uv run python test_webcam.py
+```
+
+**What to expect:**
+A live camera window will open showing bounding boxes, tracking IDs, and velocity arrows for detected objects. Press 'q' to exit.
+
+---
+
+### Test 3: Object Tracking Integration (Internal Pipeline)
 
 **What this does:** Simulates an object moving across a 640x480 frame and verifies the tracking pipeline (Tracker Node → Actuator Node). It tests ID assignment, error calculation, and state transitions without any hardware.
 
@@ -136,7 +151,7 @@ python3 src/yolo_rpi_core/test/test_tracking.py --tracker-type bytetrack
 
 ---
 
-### Test 3: Full Vision Pipeline (Advanced — Linux with USB camera)
+### Test 4: Full Vision Pipeline (Advanced — Linux with USB camera)
 
 **What this does:** Runs the complete vision pipeline — camera captures images → YOLO detects objects → results are displayed in a live window with bounding boxes.
 
@@ -146,7 +161,7 @@ ros2 launch yolo_rpi_core yolo_vision.launch.py
 
 ---
 
-### Test 4: Full Tracking Pipeline (Advanced — Linux with USB camera)
+### Test 5: Full Tracking Pipeline (Advanced — Linux with USB camera)
 
 **What this does:** Runs the complete vision-control loop — Camera captures images → YOLO detects objects → Tracker Node selects target → Dummy Actuator logs movement commands.
 
