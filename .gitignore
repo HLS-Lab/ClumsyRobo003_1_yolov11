@@ -1,0 +1,15 @@
+# Build artifacts
+*.tar
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db

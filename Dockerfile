@@ -55,19 +55,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # -----------------------------------------------------------------------------
 # Python Dependencies (pip) - CPU ONLY
 # -----------------------------------------------------------------------------
-# CRITICAL: Install CPU-only PyTorch FIRST from the official CPU wheel index.
-# This prevents ultralytics from pulling in ~4GB of CUDA/cuDNN libraries.
-# Target platform (RPi4) has no GPU, so CUDA is unnecessary.
+# CRITICAL: No GPU on target (RPi4). Use CPU-only PyTorch.
+#   - amd64: explicit CPU wheel index (prevents ~4GB CUDA download)
+#   - arm64: standard PyPI (ARM64 wheels are CPU-only by default)
 
-RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed \
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+    pip3 install --no-cache-dir --break-system-packages --ignore-installed \
+    torch torchvision torchaudio; \
+    else \
+    pip3 install --no-cache-dir --break-system-packages --ignore-installed \
     torch torchvision torchaudio \
-    --index-url https://download.pytorch.org/whl/cpu
+    --index-url https://download.pytorch.org/whl/cpu; \
+    fi
 
 # Remove apt-installed packages that conflict with pip (missing RECORD files)
-# scipy is pre-installed via apt but ultralytics needs a newer version
 RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed scipy
 
-# Now install ultralytics (will see CPU torch is already installed and skip it)
+# Install ultralytics (will see CPU torch is already installed and skip it)
 # NOTE: Do NOT use --ignore-installed here, otherwise pip re-downloads CUDA torch
 RUN pip3 install --no-cache-dir --break-system-packages \
     ultralytics \

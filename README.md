@@ -8,18 +8,23 @@ Runs inside a Docker container based on `osrf/ros:jazzy-desktop`, with CPU-only 
 
 ```
 ├── Dockerfile              # ROS 2 Jazzy + YOLOv11 CPU-only environment
-├── build_docker.sh         # Build the Docker image
+├── build_docker.sh         # Build x86 Docker image
+├── build_arm64.sh          # Cross-compile ARM64 image for RPi4
 ├── run_dev.sh              # Start dev container (Linux, with camera/X11)
+├── run_rpi4.sh             # Start headless container on RPi4
 └── yolo_rpi_core/          # ROS 2 Python package
     ├── package.xml
     ├── setup.py
+    ├── setup.cfg
     ├── config/
     │   └── yolo_params.yaml
     ├── launch/
-    │   └── yolo.launch.py
+    │   ├── yolo.launch.py          # YOLO node only
+    │   ├── yolo_vision.launch.py   # Camera + YOLO + viewer
+    │   └── yolo_headless.launch.py # Camera + YOLO (RPi4 headless)
     └── yolo_rpi_core/
         ├── __init__.py
-        └── yolo_node.py    # Main detection node
+        └── yolo_node.py
 ```
 
 ## Prerequisites
@@ -109,11 +114,56 @@ ros2 node list          # → /yolo_node
 ros2 topic list         # → /image_raw, /yolo/detections, /yolo/debug_image
 ```
 
-### Test 3: Launch File
+### Test 3: Full Vision Pipeline (Linux with camera)
 
 ```bash
-ros2 launch yolo_rpi_core yolo.launch.py model_path:=yolo11n.pt conf_threshold:=0.7
+ros2 launch yolo_rpi_core yolo_vision.launch.py
 ```
+
+Starts `v4l2_camera` + `yolo_node` + `image_view` together.
+
+## RPi4 Deployment
+
+### Step 1: Cross-compile the ARM64 image (on Host PC)
+
+```bash
+./build_arm64.sh
+# Produces: yolo_rpi_arm64.tar (~3-4 GB)
+# Takes 30-60 minutes due to QEMU emulation
+```
+
+### Step 2: Transfer to RPi4
+
+```bash
+scp yolo_rpi_arm64.tar pi@<RPI4_IP>:~/
+```
+
+### Step 3: Load and run on RPi4
+
+```bash
+# On the RPi4:
+docker load -i ~/yolo_rpi_arm64.tar
+./run_rpi4.sh
+
+# Inside the container:
+cd /ros2_ws
+colcon build --packages-select yolo_rpi_core --symlink-install
+source install/setup.bash
+ros2 launch yolo_rpi_core yolo_headless.launch.py
+```
+
+### Step 4: Remote visualization from Host PC
+
+Since both RPi4 and PC use `--network=host`, ROS 2 DDS discovers topics across the network automatically.
+
+```bash
+# On the Host PC (same Wi-Fi network):
+source /opt/ros/jazzy/setup.bash
+ros2 topic list                    # Should show RPi4's topics
+ros2 run rqt_image_view rqt_image_view  # Subscribe to /yolo/debug_image
+```
+
+> **Note:** Both machines must use the same `ROS_DOMAIN_ID` (default: 0).
 
 ## ROS 2 Topics
 
