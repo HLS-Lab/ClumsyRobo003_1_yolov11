@@ -53,20 +53,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
-# Python Dependencies (pip)
+# Python Dependencies (pip) - CPU ONLY
 # -----------------------------------------------------------------------------
-# Note: Using --break-system-packages because this is a single-purpose container.
-# Container-level isolation already exists, and this avoids complexity with
-# ROS 2 environment sourcing when using virtual environments.
-# --ignore-installed is needed because numpy is pre-installed via apt and cannot
-# be uninstalled by pip (RECORD file not found).
+# CRITICAL: Install CPU-only PyTorch FIRST from the official CPU wheel index.
+# This prevents ultralytics from pulling in ~4GB of CUDA/cuDNN libraries.
+# Target platform (RPi4) has no GPU, so CUDA is unnecessary.
 
 RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed \
-    # Ultralytics for YOLOv11
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Remove apt-installed packages that conflict with pip (missing RECORD files)
+# scipy is pre-installed via apt but ultralytics needs a newer version
+RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed scipy
+
+# Now install ultralytics (will see CPU torch is already installed and skip it)
+# NOTE: Do NOT use --ignore-installed here, otherwise pip re-downloads CUDA torch
+RUN pip3 install --no-cache-dir --break-system-packages \
     ultralytics \
-    # Setuptools for Python package management
     setuptools \
-    # Wheel for building Python packages
     wheel
 
 # -----------------------------------------------------------------------------
