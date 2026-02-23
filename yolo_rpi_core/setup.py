@@ -28,12 +28,14 @@ setup(
     zip_safe=True,
     maintainer='Developer',
     maintainer_email='user@example.com',
-    description='YOLOv11 object detection node for Raspberry Pi 4',
+    description='YOLOv11 object detection and tracking for Raspberry Pi 4',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'yolo_node = yolo_rpi_core.yolo_node:main',
+            'tracker_node = yolo_rpi_core.tracker_node:main',
+            'dummy_actuator_node = yolo_rpi_core.dummy_actuator_node:main',
         ],
     },
 )

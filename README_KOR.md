@@ -19,14 +19,20 @@
     ├── setup.py
     ├── setup.cfg
     ├── config/
-    │   └── yolo_params.yaml
+    │   ├── yolo_params.yaml
+    │   └── tracking_params.yaml    # 추적 및 액추에이터 설정
     ├── launch/
     │   ├── yolo.launch.py          # YOLO 노드만 실행
-    │   ├── yolo_vision.launch.py   # 카메라 + YOLO + 뷰어 (전체 파이프라인)
+    │   ├── yolo_vision.launch.py   # 카메라 + YOLO + 뷰어
+    │   ├── yolo_tracking.launch.py # YOLO + 추적기 + 더미 액추에이터
     │   └── yolo_headless.launch.py # 카메라 + YOLO (RPi4 헤드리스)
     └── yolo_rpi_core/
         ├── __init__.py
-        └── yolo_node.py
+        ├── yolo_node.py
+        ├── tracker_node.py         # 객체 추적 (Centroid/ByteTrack)
+        ├── bytetrack_tracker.py    # ByteTrack 알고리즘 (CPU 전용)
+        ├── base_actuator.py        # 제어용 추상 베이스 클래스
+        └── dummy_actuator_node.py  # 팬-틸트 액추에이터 시뮬레이션
 ```
 
 ## 사전 요구사항
@@ -116,55 +122,46 @@ Detected 4 objects
 
 ---
 
-### 테스트 2: ROS 2 노드 시작 (중급 — 두 개의 터미널 필요)
+### 테스트 2: 객체 추적 통합 (내부 파이프라인)
 
-**이 테스트가 하는 일:** YOLO 탐지 노드를 ROS 2 서비스로 실행합니다. 실제 로봇에서 이렇게 사용됩니다 — 카메라 이미지를 기다렸다가 탐지 결과를 발행합니다.
-
-**터미널 1** — YOLO 노드 시작:
+**이 테스트가 하는 일:** 640x480 프레임에서 움직이는 객체를 시뮬레이션하고 추적 파이프라인(추적 노드 → 액추에이터 노드)을 검증합니다. 하드웨어 없이 ID 할당, 오차 계산, 상태 전이를 테스트합니다.
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source /ros2_ws/install/setup.bash
-ros2 run yolo_rpi_core yolo_node --ros-args -p model_path:=yolo11n.pt
+# Centroid Tracker로 실행 (기본값)
+python3 src/yolo_rpi_core/test/test_tracking.py --tracker-type centroid
+
+# ByteTrack으로 실행 (Kalman Filter)
+python3 src/yolo_rpi_core/test/test_tracking.py --tracker-type bytetrack
 ```
-
-다음과 같이 출력되어야 합니다:
-
-```
-[INFO] [yolo_node]: Loading YOLO model: yolo11n.pt
-[INFO] [yolo_node]: Device: cpu
-[INFO] [yolo_node]: YoloNode initialized and ready!
-```
-
-**터미널 2** — **새 터미널 창**을 열고 같은 컨테이너에 접속:
-
-```bash
-docker exec -it yolo_dev bash
-```
-
-노드가 실행 중인지 확인합니다:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source /ros2_ws/install/setup.bash
-
-ros2 node list          # 출력: /yolo_node
-ros2 topic list         # 포함: /image_raw, /yolo/detections, /yolo/debug_image
-```
-
-> ✅ `ros2 node list`에 `/yolo_node`가 보이면 — **성공!** ROS 2 노드가 활성화되어 카메라 이미지를 기다리고 있습니다.
 
 ---
 
 ### 테스트 3: 전체 비전 파이프라인 (고급 — USB 카메라가 있는 Linux 환경)
 
-**이 테스트가 하는 일:** 전체 파이프라인을 실행합니다 — 카메라가 이미지 캡처 → YOLO가 객체 탐지 → 실시간 화면에 바운딩 박스가 그려진 영상이 표시됩니다.
-
-**필수 조건:** USB 카메라와 X11 디스플레이가 있는 Linux 호스트 (`run_dev.sh` 참고).
+**이 테스트가 하는 일:** 전체 비전 파이프라인을 실행합니다 — 카메라가 이미지 캡처 → YOLO가 객체 탐지 → 실시간 화면에 바운딩 박스를 표시합니다.
 
 ```bash
 ros2 launch yolo_rpi_core yolo_vision.launch.py
 ```
+
+---
+
+### 테스트 4: 전체 추적 파이프라인 (고급 — USB 카메라가 있는 Linux 환경)
+
+**이 테스트가 하는 일:** 전체 비전 제어 루프를 실행합니다 — 카메라 이미지 캡처 → YOLO 객체 탐지 → 추적 노드가 타겟 선택 → 더미 액추에이터가 제어 명령을 로그로 기록합니다.
+
+```bash
+ros2 launch yolo_rpi_core yolo_tracking.launch.py
+```
+
+---
+
+## 객체 추적 (Object Tracking)
+
+본 프로젝트는 두 가지 추적 알고리즘을 지원합니다 (`tracker_type` 파라미터로 선택):
+
+1. **Centroid Tracker**: 구현이 단순하고 매우 빠릅니다. 가림(occlusion)이 적은 단일 객체 추적에 적합합니다.
+2. **ByteTrack**: **Kalman Filter**와 IoU 매칭, 2단계 연관(association) 방식을 사용합니다. 낮은 신뢰도의 탐지 결과도 활용하여 객체가 가려지는 상황을 훨씬 잘 처리합니다. CPU 전용으로 경량화되어 있습니다.
 
 이 명령은 세 개의 노드를 동시에 시작합니다:
 
@@ -229,16 +226,36 @@ ros2 run rqt_image_view rqt_image_view           # /yolo/debug_image 구독
 
 ## ROS 2 토픽
 
-| 토픽                | 타입                               | 설명                        |
-| ------------------- | ---------------------------------- | --------------------------- |
-| `/image_raw`        | `sensor_msgs/msg/Image`            | 입력 카메라 이미지          |
-| `/yolo/detections`  | `vision_msgs/msg/Detection2DArray` | 탐지 결과                   |
-| `/yolo/debug_image` | `sensor_msgs/msg/Image`            | 바운딩 박스가 그려진 이미지 |
+| 토픽                    | 타입                               | 설명                     |
+| ----------------------- | ---------------------------------- | ------------------------ |
+| `/image_raw`            | `sensor_msgs/msg/Image`            | 입력 카메라 이미지       |
+| `/yolo/detections`      | `vision_msgs/msg/Detection2DArray` | 원본 YOLO 탐지 결과      |
+| `/tracking/command`     | `std_msgs/msg/String` (JSON)       | 제어용 타겟 오차 및 속도 |
+| `/tracking/status`      | `std_msgs/msg/String` (JSON)       | 액추에이터 상태 피드백   |
+| `/yolo/debug_image`     | `sensor_msgs/msg/Image`            | 시각화된 YOLO 탐지 결과  |
+| `/tracking/debug_image` | `sensor_msgs/msg/Image`            | 시각화된 객체 추적 결과  |
 
 ## 파라미터
+
+### YOLO 노드
 
 | 파라미터         | 타입   | 기본값       | 설명                  |
 | ---------------- | ------ | ------------ | --------------------- |
 | `model_path`     | string | `yolo11n.pt` | YOLO 가중치 파일 경로 |
 | `device`         | string | `cpu`        | 추론 디바이스         |
 | `conf_threshold` | float  | `0.5`        | 신뢰도 임계값         |
+
+### 추적 노드 (Tracker Node)
+
+| 파라미터                | 타입   | 기본값     | 설명                                   |
+| ----------------------- | ------ | ---------- | -------------------------------------- |
+| `tracker_type`          | string | `centroid` | 알고리즘 (`centroid` 또는 `bytetrack`) |
+| `tracking_target_class` | string | `person`   | 추적할 대상 클래스 이름                |
+| `max_disappeared`       | int    | `30`       | 대상을 놓쳤을 때 유지할 프레임 수      |
+| `max_distance`          | float  | `80.0`     | Centroid 매칭 범위 (픽셀)              |
+
+---
+
+## 아키텍처 (Architecture)
+
+소프트웨어 설계(OOP 패턴, 상태 머신, JSON 스키마 등)에 대한 자세한 내용은 **[ARCHITECTURE.md](ARCHITECTURE.md)**를 참고하세요.

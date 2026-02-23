@@ -19,14 +19,20 @@ Runs inside a Docker container based on `osrf/ros:jazzy-desktop`, with CPU-only 
     ├── setup.py
     ├── setup.cfg
     ├── config/
-    │   └── yolo_params.yaml
+    │   ├── yolo_params.yaml
+    │   └── tracking_params.yaml    # Tracking & Actuator config
     ├── launch/
     │   ├── yolo.launch.py          # YOLO node only
-    │   ├── yolo_vision.launch.py   # Camera + YOLO + viewer (full pipeline)
+    │   ├── yolo_vision.launch.py   # Camera + YOLO + viewer
+    │   ├── yolo_tracking.launch.py # YOLO + Tracker + Dummy Actuator
     │   └── yolo_headless.launch.py # Camera + YOLO (RPi4 headless)
     └── yolo_rpi_core/
         ├── __init__.py
-        └── yolo_node.py
+        ├── yolo_node.py
+        ├── tracker_node.py         # Object tracking (Centroid/ByteTrack)
+        ├── bytetrack_tracker.py    # ByteTrack algorithm (CPU-only)
+        ├── base_actuator.py        # Abstract base class for control
+        └── dummy_actuator_node.py  # Simulation of pan-tilt actuator
 ```
 
 ## Prerequisites
@@ -116,55 +122,46 @@ Detected 4 objects
 
 ---
 
-### Test 2: ROS 2 Node Startup (Intermediate — two terminals needed)
+### Test 2: Object Tracking Integration (Internal Pipeline)
 
-**What this does:** Starts the YOLO detection node as a proper ROS 2 service. This is how the robot will actually use it — waiting for camera images and publishing detections.
-
-**Terminal 1** — Start the YOLO node:
+**What this does:** Simulates an object moving across a 640x480 frame and verifies the tracking pipeline (Tracker Node → Actuator Node). It tests ID assignment, error calculation, and state transitions without any hardware.
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source /ros2_ws/install/setup.bash
-ros2 run yolo_rpi_core yolo_node --ros-args -p model_path:=yolo11n.pt
+# Run with Centroid Tracker (default)
+python3 src/yolo_rpi_core/test/test_tracking.py --tracker-type centroid
+
+# Run with ByteTrack (Kalman Filter)
+python3 src/yolo_rpi_core/test/test_tracking.py --tracker-type bytetrack
 ```
-
-You should see:
-
-```
-[INFO] [yolo_node]: Loading YOLO model: yolo11n.pt
-[INFO] [yolo_node]: Device: cpu
-[INFO] [yolo_node]: YoloNode initialized and ready!
-```
-
-**Terminal 2** — Open a **new terminal window** and connect to the same container:
-
-```bash
-docker exec -it yolo_dev bash
-```
-
-Then verify the node is running:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source /ros2_ws/install/setup.bash
-
-ros2 node list          # Should print: /yolo_node
-ros2 topic list         # Should include: /image_raw, /yolo/detections, /yolo/debug_image
-```
-
-> ✅ If `ros2 node list` shows `/yolo_node` — **success!** The ROS 2 node is alive and waiting for camera images.
 
 ---
 
 ### Test 3: Full Vision Pipeline (Advanced — Linux with USB camera)
 
-**What this does:** Runs the complete pipeline — camera captures images → YOLO detects objects → results are displayed in a live window with bounding boxes drawn on the video feed.
-
-**Requirements:** Linux host with USB camera + X11 display (see `run_dev.sh`).
+**What this does:** Runs the complete vision pipeline — camera captures images → YOLO detects objects → results are displayed in a live window with bounding boxes.
 
 ```bash
 ros2 launch yolo_rpi_core yolo_vision.launch.py
 ```
+
+---
+
+### Test 4: Full Tracking Pipeline (Advanced — Linux with USB camera)
+
+**What this does:** Runs the complete vision-control loop — Camera captures images → YOLO detects objects → Tracker Node selects target → Dummy Actuator logs movement commands.
+
+```bash
+ros2 launch yolo_rpi_core yolo_tracking.launch.py
+```
+
+---
+
+## Object Tracking
+
+This project supports two tracking algorithms (selected via `tracker_type` parameter):
+
+1. **Centroid Tracker**: Simple and extremely fast. Best for single-object tracking with minimal occlusion.
+2. **ByteTrack**: Uses **Kalman Filters** and IoU matching with a 2-stage association. Handles occlusion much better by reusing low-confidence detections. CPU-only and lightweight.
 
 This starts three nodes at once:
 
@@ -229,16 +226,36 @@ ros2 run rqt_image_view rqt_image_view           # View /yolo/debug_image
 
 ## ROS 2 Topics
 
-| Topic               | Type                               | Description               |
-| ------------------- | ---------------------------------- | ------------------------- |
-| `/image_raw`        | `sensor_msgs/msg/Image`            | Input camera images       |
-| `/yolo/detections`  | `vision_msgs/msg/Detection2DArray` | Detection results         |
-| `/yolo/debug_image` | `sensor_msgs/msg/Image`            | Image with bounding boxes |
+| Topic                   | Type                               | Description                 |
+| ----------------------- | ---------------------------------- | --------------------------- |
+| `/image_raw`            | `sensor_msgs/msg/Image`            | Input camera images         |
+| `/yolo/detections`      | `vision_msgs/msg/Detection2DArray` | Raw YOLO detections         |
+| `/tracking/command`     | `std_msgs/msg/String` (JSON)       | Target errors & velocity    |
+| `/tracking/status`      | `std_msgs/msg/String` (JSON)       | Actuator state feedback     |
+| `/yolo/debug_image`     | `sensor_msgs/msg/Image`            | Visualized YOLO results     |
+| `/tracking/debug_image` | `sensor_msgs/msg/Image`            | Visualized Tracking results |
 
 ## Parameters
 
-| Parameter        | Type   | Default      | Description          |
+### YOLO Node
+
+| Name             | Type   | Default      | Description          |
 | ---------------- | ------ | ------------ | -------------------- |
 | `model_path`     | string | `yolo11n.pt` | Path to YOLO weights |
 | `device`         | string | `cpu`        | Inference device     |
 | `conf_threshold` | float  | `0.5`        | Confidence threshold |
+
+### Tracker Node
+
+| Name                    | Type   | Default    | Description                           |
+| ----------------------- | ------ | ---------- | ------------------------------------- |
+| `tracker_type`          | string | `centroid` | Algorithm (`centroid` or `bytetrack`) |
+| `tracking_target_class` | string | `person`   | Target class name to follow           |
+| `max_disappeared`       | int    | `30`       | Frames to wait for lost target        |
+| `max_distance`          | float  | `80.0`     | Range for Centroid matching (px)      |
+
+---
+
+## Architecture
+
+For a detailed dive into the software design (OOP patterns, State Machines, JSON Schemas), please refer to **[ARCHITECTURE.md](ARCHITECTURE.md)**.

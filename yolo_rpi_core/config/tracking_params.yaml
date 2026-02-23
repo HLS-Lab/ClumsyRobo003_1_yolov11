@@ -1,0 +1,42 @@
+# =============================================================================
+# Tracking Node Parameters
+# =============================================================================
+# Configuration for tracker_node and dummy_actuator_node
+# Target: Raspberry Pi 4 (CPU-only)
+# =============================================================================
+
+tracker_node:
+  ros__parameters:
+    # Class name to track (from YOLO model). Use 'all' to track any class.
+    tracking_target_class: "person"
+
+    # Tracker algorithm: "centroid" or "bytetrack"
+    tracker_type: "centroid"
+
+    # Camera resolution (must match v4l2_camera settings)
+    image_width: 640
+    image_height: 480
+
+    # --- CentroidTracker parameters ---
+    # Frames to wait before deregistering a lost object
+    max_disappeared: 30
+    # Max pixel distance to match detections across frames
+    max_distance: 80.0
+
+    # --- ByteTrackTracker parameters ---
+    # Detections with confidence >= this are "high confidence" (Stage 1)
+    track_high_thresh: 0.5
+    # Detections with confidence >= this but < high_thresh are "low confidence" (Stage 2)
+    # Detections below this are discarded entirely
+    track_low_thresh: 0.1
+    # IoU match threshold (1 - match_thresh = minimum IoU to accept a match)
+    # Lower value = more strict matching
+    match_thresh: 0.8
+
+dummy_actuator_node:
+  ros__parameters:
+    # Human-readable name for this actuator instance
+    actuator_name: "dummy_pan_tilt"
+
+    # Status publish rate (Hz)
+    status_publish_rate: 2.0
