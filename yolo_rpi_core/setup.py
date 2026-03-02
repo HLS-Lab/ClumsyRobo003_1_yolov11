@@ -36,6 +36,7 @@ setup(
             'yolo_node = yolo_rpi_core.yolo_node:main',
             'tracker_node = yolo_rpi_core.tracker_node:main',
             'dummy_actuator_node = yolo_rpi_core.dummy_actuator_node:main',
+            'serial_motor_actuator_node = yolo_rpi_core.serial_motor_actuator_node:main',
         ],
     },
 )

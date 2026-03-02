@@ -33,6 +33,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Python tools
     python3-pip \
     python3-venv \
+    # Python serial library (for serial_motor_actuator_node)
+    python3-serial \
     # ROS 2 camera and image processing packages
     ros-${ROS_DISTRO}-v4l2-camera \
     ros-${ROS_DISTRO}-image-transport-plugins \

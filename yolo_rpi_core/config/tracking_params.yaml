@@ -40,3 +40,45 @@ dummy_actuator_node:
 
     # Status publish rate (Hz)
     status_publish_rate: 2.0
+
+# =============================================================================
+# Serial Motor Actuator Node Parameters
+# =============================================================================
+# Real actuator using UART / USB-Serial to a motor controller board.
+# Protocol (control_v1): JSON + newline  →  {"angle1": 90, "angle2": 90}\n
+# =============================================================================
+
+serial_motor_actuator_node:
+  ros__parameters:
+    # Human-readable name for this actuator instance
+    actuator_name: "serial_pan_tilt"
+
+    # Status publish rate (Hz)
+    status_publish_rate: 2.0
+
+    # --- Serial port settings ---
+    # Device path (Linux: /dev/ttyUSB0 or /dev/ttyACM0)
+    serial_port: "/dev/ttyUSB0"
+    # Baud rate (must match motor controller firmware)
+    serial_baud: 115200
+    # Read/write timeout in seconds
+    serial_timeout: 1.0
+
+    # --- Simulation mode ---
+    # true  : no real serial I/O — safe for CI and development without hardware
+    # false : real hardware mode — connect USB-serial before launching
+    simulation_mode: true
+
+    # --- Angle mapping ---
+    # Motor rest / center position (degrees). 90 = center for 0–180 range.
+    center_angle: 90.0
+
+    # Pan/tilt gain: degrees of motor movement per unit of tracking error [-1, 1].
+    # Set to 0.0 for DEMO MODE: motor always goes to center (90°) when target detected.
+    # Set > 0 to enable proportional tracking (e.g. pan_range_deg: 45.0).
+    pan_range_deg: 0.0
+    tilt_range_deg: 0.0
+
+    # Hardware angle limits (degrees) — clamped before sending to motor
+    min_angle: 0.0
+    max_angle: 180.0

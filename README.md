@@ -29,10 +29,12 @@ Runs inside a Docker container based on `osrf/ros:jazzy-desktop`, with CPU-only 
     └── yolo_rpi_core/
         ├── __init__.py
         ├── yolo_node.py
-        ├── tracker_node.py         # Object tracking (Centroid/ByteTrack)
-        ├── bytetrack_tracker.py    # ByteTrack algorithm (CPU-only)
-        ├── base_actuator.py        # Abstract base class for control
-        └── dummy_actuator_node.py  # Simulation of pan-tilt actuator
+        ├── tracker_node.py              # Object tracking (Centroid/ByteTrack)
+        ├── bytetrack_tracker.py         # ByteTrack algorithm (CPU-only)
+        ├── base_actuator.py             # Abstract base class for control
+        ├── dummy_actuator_node.py       # Simulation of pan-tilt actuator
+        ├── serial_motor_controller.py   # UART/JSON adapter (control_v1 protocol)
+        └── serial_motor_actuator_node.py # Real motor actuator (USB-serial)
 ```
 
 ## Prerequisites
@@ -171,6 +173,29 @@ ros2 launch yolo_rpi_core yolo_tracking.launch.py
 
 ---
 
+### Test 6: Serial Motor Actuator — Simulation Mode (no hardware needed)
+
+**What this does:** Runs `SerialMotorActuatorNode` in **simulation mode** (no USB-serial device required). When a person is detected, both motors are commanded to **90° (center)**. Verifies IDLE → TRACKING state machine and motor-specific status messages.
+
+```bash
+# Build and source first (inside container)
+colcon build --packages-select yolo_rpi_core && source install/setup.bash
+
+# Run the no-hardware test
+python3 src/yolo_rpi_core/test/test_serial_motor_actuator.py
+```
+
+**To launch with the real motor** (hardware attached at `/dev/ttyUSB0`):
+
+```bash
+ros2 launch yolo_rpi_core yolo_tracking.launch.py \
+    use_real_motor:=true \
+    simulation_mode:=false \
+    serial_port:=/dev/ttyUSB0
+```
+
+---
+
 ## Object Tracking
 
 This project supports two tracking algorithms (selected via `tracker_type` parameter):
@@ -268,6 +293,22 @@ ros2 run rqt_image_view rqt_image_view           # View /yolo/debug_image
 | `tracking_target_class` | string | `person`   | Target class name to follow           |
 | `max_disappeared`       | int    | `30`       | Frames to wait for lost target        |
 | `max_distance`          | float  | `80.0`     | Range for Centroid matching (px)      |
+
+### Serial Motor Actuator Node
+
+| Name              | Type   | Default        | Description                                                            |
+| ----------------- | ------ | -------------- | ---------------------------------------------------------------------- |
+| `serial_port`     | string | `/dev/ttyUSB0` | USB-serial device path                                                 |
+| `serial_baud`     | int    | `115200`       | Baud rate (must match motor controller firmware)                       |
+| `simulation_mode` | bool   | `true`         | `true` = no serial I/O (CI/dev); `false` = real hardware               |
+| `center_angle`    | float  | `90.0`         | Motor center position in degrees                                       |
+| `pan_range_deg`   | float  | `0.0`          | Pan gain: degrees per unit of `error_x`. `0` = demo mode (always 90°)  |
+| `tilt_range_deg`  | float  | `0.0`          | Tilt gain: degrees per unit of `error_y`. `0` = demo mode (always 90°) |
+| `min_angle`       | float  | `0.0`          | Hardware lower angle limit (degrees)                                   |
+| `max_angle`       | float  | `180.0`        | Hardware upper angle limit (degrees)                                   |
+
+> 💡 **Demo mode** (default): `pan_range_deg: 0.0` → when a person is detected, both motors go to 90° (center).  
+> Set `pan_range_deg: 45.0` and `tilt_range_deg: 30.0` to enable proportional pan-tilt tracking.
 
 ---
 
