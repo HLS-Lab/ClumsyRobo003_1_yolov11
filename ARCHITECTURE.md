@@ -227,10 +227,14 @@ required (suitable for RPi4).
 
 ```
 rclpy.node.Node
-    └── BaseActuatorNode (ABC)    ← base_actuator.py
-            ├── DummyActuatorNode     ← dummy_actuator_node.py (logs only)
-            ├── ServoActuatorNode     ← (future: PWM servo control)
-            └── StepperActuatorNode   ← (future: stepper motor control)
+    └── BaseActuatorNode (ABC)        ← base_actuator.py
+            ├── DummyActuatorNode         ← dummy_actuator_node.py (logs only)
+            ├── SerialMotorActuatorNode   ← serial_motor_actuator_node.py (USB-serial)
+            ├── ServoActuatorNode         ← (future: PWM servo control)
+            └── StepperActuatorNode       ← (future: stepper motor control)
+
+SerialMotorActuatorNode
+    └── uses SerialMotorController  ← serial_motor_controller.py (UART I/O)
 ```
 
 ### Subscriptions
@@ -256,12 +260,21 @@ ERROR ─────► IDLE      (recovery / reset)
 
 ## Launch Files
 
-| File                      | Nodes Started                                                        | Use Case                  |
-| ------------------------- | -------------------------------------------------------------------- | ------------------------- |
-| `yolo.launch.py`          | `yolo_node`                                                          | Node-only (manual camera) |
-| `yolo_vision.launch.py`   | `v4l2_camera` + `yolo_node` + `image_view`                           | PC development with GUI   |
-| `yolo_headless.launch.py` | `v4l2_camera` + `yolo_node`                                          | RPi4 headless deployment  |
-| `yolo_tracking.launch.py` | `v4l2_camera` + `yolo_node` + `tracker_node` + `dummy_actuator_node` | Full tracking pipeline    |
+| File                      | Nodes Started                                                                                        | Use Case                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `yolo.launch.py`          | `yolo_node`                                                                                          | Node-only (manual camera)     |
+| `yolo_vision.launch.py`   | `v4l2_camera` + `yolo_node` + `image_view`                                                           | PC development with GUI       |
+| `yolo_headless.launch.py` | `v4l2_camera` + `yolo_node`                                                                          | RPi4 headless deployment      |
+| `yolo_tracking.launch.py` | `v4l2_camera` + `yolo_node` + `tracker_node` + `dummy_actuator_node` (default)                       | Full tracking pipeline        |
+| `yolo_tracking.launch.py` | `v4l2_camera` + `yolo_node` + `tracker_node` + `serial_motor_actuator_node` (`use_real_motor:=true`) | Full pipeline with real motor |
+
+### Launch Driver Arguments
+
+| Argument          | Default        | Description                                                                 |
+| ----------------- | -------------- | --------------------------------------------------------------------------- |
+| `use_real_motor`  | `false`        | `true` → activates `SerialMotorActuatorNode` instead of `DummyActuatorNode` |
+| `serial_port`     | `/dev/ttyUSB0` | USB-serial device path passed to motor actuator node                        |
+| `simulation_mode` | `true`         | `false` → sends real UART frames; `true` → logs only (CI/dev safe)          |
 
 ## File Map
 
@@ -272,6 +285,12 @@ ERROR ─────► IDLE      (recovery / reset)
 ├── build_arm64.sh              # Cross-compile ARM64 image (QEMU + buildx)
 ├── run_dev.sh                  # x86 dev container (camera + X11)
 ├── run_rpi4.sh                 # RPi4 headless container
+├── .agent/
+│   ├── rules/                  # Project-specific agent rules
+│   └── skills/
+│       ├── project-development/ # Pipeline architecture & dev methodology
+│       ├── filesystem-context/  # Filesystem-as-memory patterns
+│       └── evaluation/          # Testing & quality gate patterns
 └── yolo_rpi_core/
     ├── package.xml             # ROS 2 package manifest (ament_python)
     ├── setup.py                # Python package config + entry points
@@ -283,15 +302,81 @@ ERROR ─────► IDLE      (recovery / reset)
     │   ├── yolo.launch.py
     │   ├── yolo_vision.launch.py
     │   ├── yolo_headless.launch.py
-    │   └── yolo_tracking.launch.py   # Full tracking pipeline
+    │   └── yolo_tracking.launch.py   # Full tracking pipeline (use_real_motor arg)
     ├── resource/
     │   └── yolo_rpi_core       # ament resource index marker
     ├── test/
-    │   └── test_tracking.py    # Integration test (init point based)
+    │   ├── test_tracking.py                # Integration test (centroid/bytetrack)
+    │   └── test_serial_motor_actuator.py   # Motor actuator simulation test
     └── yolo_rpi_core/
         ├── __init__.py
-        ├── yolo_node.py        # YoloNode implementation (234 lines)
-        ├── tracker_node.py     # CentroidTracker + TrackerNode
-        ├── base_actuator.py    # Abstract BaseActuatorNode (ABC)
-        └── dummy_actuator_node.py  # DummyActuatorNode (log-only)
+        ├── yolo_node.py              # YoloNode implementation (234 lines)
+        ├── tracker_node.py           # CentroidTracker + TrackerNode
+        ├── bytetrack_tracker.py      # ByteTrack algorithm (CPU-only)
+        ├── base_actuator.py          # Abstract BaseActuatorNode (ABC)
+        ├── dummy_actuator_node.py    # DummyActuatorNode (log-only)
+        ├── serial_motor_controller.py    # UART/JSON adapter (control_v1 protocol)
+        └── serial_motor_actuator_node.py # Real motor actuator (USB-serial)
 ```
+
+## Node: `serial_motor_actuator_node`
+
+**Source:** `yolo_rpi_core/yolo_rpi_core/serial_motor_actuator_node.py`  
+**Inherits:** `BaseActuatorNode` → `SerialMotorActuatorNode`  
+**Companion:** `yolo_rpi_core/yolo_rpi_core/serial_motor_controller.py`
+
+### Motor Protocol (ported from `control_v1`)
+
+| Property   | Value                                                 |
+| ---------- | ----------------------------------------------------- |
+| Transport  | UART via USB-Serial (`/dev/ttyUSB0`)                  |
+| Baud rate  | 115200                                                |
+| Framing    | `{"angle1": 90.0, "angle2": 90.0}\n` (JSON + newline) |
+| Reader     | Daemon thread, 10ms poll (non-blocking)               |
+| Simulation | `simulation_mode=True` logs instead of writing serial |
+
+### Angle Mapping
+
+```
+angle1 = clamp(center_angle + error_x × pan_range_deg,  min_angle, max_angle)
+angle2 = clamp(center_angle + error_y × tilt_range_deg, min_angle, max_angle)
+```
+
+**Demo mode** (`pan_range_deg=0`, default): Any human detection → both motors → 90° (center).  
+**Proportional tracking** (`pan_range_deg=45`, `tilt_range_deg=30`): Motors follow target position proportionally.
+
+### Parameters
+
+| Name              | Type   | Default        | Description                          |
+| ----------------- | ------ | -------------- | ------------------------------------ |
+| `serial_port`     | string | `/dev/ttyUSB0` | USB-serial device path               |
+| `serial_baud`     | int    | `115200`       | Baud rate                            |
+| `simulation_mode` | bool   | `true`         | `true` = no serial I/O               |
+| `center_angle`    | float  | `90.0`         | Motor center position (degrees)      |
+| `pan_range_deg`   | float  | `0.0`          | Pan gain (degrees per unit error_x)  |
+| `tilt_range_deg`  | float  | `0.0`          | Tilt gain (degrees per unit error_y) |
+| `min_angle`       | float  | `0.0`          | Hardware lower limit (degrees)       |
+| `max_angle`       | float  | `180.0`        | Hardware upper limit (degrees)       |
+
+### Additional Status Fields
+
+`SerialMotorActuatorNode` extends the base status JSON with:
+
+```json
+{
+  "state": "TRACKING",
+  "last_angles": [90.0, 90.0],
+  "serial_port": "/dev/ttyUSB0",
+  "simulation_mode": false
+}
+```
+
+## Agent Skills
+
+This project includes AI agent skills in `.agent/skills/` to assist with development:
+
+| Skill                 | When to Use                                                               |
+| --------------------- | ------------------------------------------------------------------------- |
+| `project-development` | Designing new pipeline stages, porting protocols, architectural decisions |
+| `filesystem-context`  | Managing context across large codebases, organizing config and logs       |
+| `evaluation`          | Building test harnesses, quality gates, validating actuator behavior      |
