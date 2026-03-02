@@ -2,12 +2,24 @@
 """
 Launch file for the full YOLO + Object Tracking pipeline.
 
-Starts camera, YOLO detection, centroid tracker, and dummy actuator nodes.
+Starts camera, YOLO detection, centroid tracker, and actuator nodes.
+By default, the dummy actuator is used. Pass use_real_motor:=true to
+activate the real serial motor actuator (hardware must be connected).
 
-Usage:
+Usage::
+
+    # Default (dummy actuator — no hardware needed)
     ros2 launch yolo_rpi_core yolo_tracking.launch.py
+
+    # Real motor hardware
+    ros2 launch yolo_rpi_core yolo_tracking.launch.py use_real_motor:=true
+
+    # Real motor with custom serial port
+    ros2 launch yolo_rpi_core yolo_tracking.launch.py \\
+        use_real_motor:=true serial_port:=/dev/ttyACM0
+
+    # Class-specific tracking
     ros2 launch yolo_rpi_core yolo_tracking.launch.py tracking_target_class:=cup
-    ros2 launch yolo_rpi_core yolo_tracking.launch.py video_device:=/dev/video1
 """
 
 import os
@@ -15,6 +27,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -53,6 +66,30 @@ def generate_launch_description() -> LaunchDescription:
         'tracking_target_class',
         default_value='person',
         description='YOLO class name to track (use "all" for any)',
+    )
+
+    use_real_motor_arg = DeclareLaunchArgument(
+        'use_real_motor',
+        default_value='false',
+        description=(
+            'Set to "true" to launch SerialMotorActuatorNode (real hardware). '
+            'Default "false" launches DummyActuatorNode (log-only, no hardware).'
+        ),
+    )
+
+    serial_port_arg = DeclareLaunchArgument(
+        'serial_port',
+        default_value='/dev/ttyUSB0',
+        description='Serial device path for the motor controller (use_real_motor only)',
+    )
+
+    simulation_mode_arg = DeclareLaunchArgument(
+        'simulation_mode',
+        default_value='false',
+        description=(
+            'Set to "true" to run SerialMotorActuatorNode in simulation mode '
+            '(no serial I/O — useful for dev / CI without hardware).'
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -106,14 +143,33 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # -------------------------------------------------------------------------
-    # Node 4: Dummy Actuator
+    # Node 4a: Dummy Actuator (default — no hardware)
     # -------------------------------------------------------------------------
-    actuator_node = Node(
+    dummy_actuator_node = Node(
         package='yolo_rpi_core',
         executable='dummy_actuator_node',
         name='dummy_actuator_node',
         output='screen',
         parameters=[tracking_params],
+        condition=UnlessCondition(LaunchConfiguration('use_real_motor')),
+    )
+
+    # -------------------------------------------------------------------------
+    # Node 4b: Serial Motor Actuator (real hardware — use_real_motor:=true)
+    # -------------------------------------------------------------------------
+    serial_motor_actuator_node = Node(
+        package='yolo_rpi_core',
+        executable='serial_motor_actuator_node',
+        name='serial_motor_actuator_node',
+        output='screen',
+        parameters=[
+            tracking_params,
+            {
+                'serial_port': LaunchConfiguration('serial_port'),
+                'simulation_mode': LaunchConfiguration('simulation_mode'),
+            },
+        ],
+        condition=IfCondition(LaunchConfiguration('use_real_motor')),
     )
 
     return LaunchDescription([
@@ -121,8 +177,13 @@ def generate_launch_description() -> LaunchDescription:
         model_path_arg,
         conf_threshold_arg,
         tracking_target_arg,
+        use_real_motor_arg,
+        serial_port_arg,
+        simulation_mode_arg,
         camera_node,
         yolo_node,
         tracker_node,
-        actuator_node,
+        dummy_actuator_node,
+        serial_motor_actuator_node,
     ])
+

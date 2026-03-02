@@ -29,10 +29,12 @@
     └── yolo_rpi_core/
         ├── __init__.py
         ├── yolo_node.py
-        ├── tracker_node.py         # 객체 추적 (Centroid/ByteTrack)
-        ├── bytetrack_tracker.py    # ByteTrack 알고리즘 (CPU 전용)
-        ├── base_actuator.py        # 제어용 추상 베이스 클래스
-        └── dummy_actuator_node.py  # 팬-틸트 액추에이터 시뮬레이션
+        ├── tracker_node.py              # 객체 추적 (Centroid/ByteTrack)
+        ├── bytetrack_tracker.py         # ByteTrack 알고리즘 (CPU 전용)
+        ├── base_actuator.py             # 제어용 추상 베이스 클래스
+        ├── dummy_actuator_node.py       # 팬-틸트 액추에이터 시뮬레이션
+        ├── serial_motor_controller.py   # UART/JSON 어댑터 (control_v1 프로토콜)
+        └── serial_motor_actuator_node.py # 실제 모터 액추에이터 (USB-시리얼)
 ```
 
 ## 사전 요구사항
@@ -171,6 +173,29 @@ ros2 launch yolo_rpi_core yolo_tracking.launch.py
 
 ---
 
+### 테스트 6: 시리얼 모터 액추에이터 — 시뮬레이션 모드 (하드웨어 불필요)
+
+**이 테스트가 하는 일:** `SerialMotorActuatorNode`를 **시뮬레이션 모드**로 실행합니다 (USB-시리얼 장치 불필요). 사람이 감지되면 두 모터 모두 **90° (중심)** 명령을 내립니다. IDLE → TRACKING 상태 머신과 모터 상태 메시지를 검증합니다.
+
+```bash
+# 먼저 빌드 및 소스 적용 (컨테이너 내부)
+colcon build --packages-select yolo_rpi_core && source install/setup.bash
+
+# 하드웨어 없이 테스트 실행
+python3 src/yolo_rpi_core/test/test_serial_motor_actuator.py
+```
+
+**실제 모터로 실행** (`/dev/ttyUSB0`에 하드웨어 연결 시):
+
+```bash
+ros2 launch yolo_rpi_core yolo_tracking.launch.py \
+    use_real_motor:=true \
+    simulation_mode:=false \
+    serial_port:=/dev/ttyUSB0
+```
+
+---
+
 ## 객체 추적 (Object Tracking)
 
 본 프로젝트는 두 가지 추적 알고리즘을 지원합니다 (`tracker_type` 파라미터로 선택):
@@ -268,6 +293,22 @@ ros2 run rqt_image_view rqt_image_view           # /yolo/debug_image 구독
 | `tracking_target_class` | string | `person`   | 추적할 대상 클래스 이름                |
 | `max_disappeared`       | int    | `30`       | 대상을 놓쳤을 때 유지할 프레임 수      |
 | `max_distance`          | float  | `80.0`     | Centroid 매칭 범위 (픽셀)              |
+
+### 시리얼 모터 액추에이터 노드 (Serial Motor Actuator Node)
+
+| 파라미터          | 타입   | 기본값         | 설명                                                              |
+| ----------------- | ------ | -------------- | ----------------------------------------------------------------- |
+| `serial_port`     | string | `/dev/ttyUSB0` | USB-시리얼 장치 경로                                              |
+| `serial_baud`     | int    | `115200`       | 전송 속도 (모터 컨트롤러 펌웨어와 일치해야 함)                    |
+| `simulation_mode` | bool   | `true`         | `true` = 시리얼 없이 로그만 출력; `false` = 실제 하드웨어         |
+| `center_angle`    | float  | `90.0`         | 모터 중심 위치 (도)                                               |
+| `pan_range_deg`   | float  | `0.0`          | 팬 게인: `error_x` 단위당 이동 각도. `0` = 데모 모드 (항상 90°)   |
+| `tilt_range_deg`  | float  | `0.0`          | 틸트 게인: `error_y` 단위당 이동 각도. `0` = 데모 모드 (항상 90°) |
+| `min_angle`       | float  | `0.0`          | 하드웨어 최소 각도 한계 (도)                                      |
+| `max_angle`       | float  | `180.0`        | 하드웨어 최대 각도 한계 (도)                                      |
+
+> 💡 **데모 모드** (기본값): `pan_range_deg: 0.0` → 사람이 감지되면 두 모터 모두 **90° (중심)**으로 이동합니다.  
+> 비례 팬-틸트 추적을 활성화하려면 `pan_range_deg: 45.0`, `tilt_range_deg: 30.0`으로 설정하세요.
 
 ---
 
