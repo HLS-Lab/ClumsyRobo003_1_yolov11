@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import math
 from collections import OrderedDict
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -42,10 +41,19 @@ from cv_bridge import CvBridge
 
 from yolo_rpi_core.tracked_object import TrackedObject
 
+DetectionInput = Tuple[
+    Tuple[float, float],
+    Tuple[float, float, float, float],
+    str,
+    float,
+]
+TrackedObjects = Dict[int, TrackedObject]
+
 
 # =============================================================================
 # CentroidTracker — Pure Python, no ROS dependency
 # =============================================================================
+
 
 class CentroidTracker:
     """
@@ -87,8 +95,8 @@ class CentroidTracker:
 
     def update(
         self,
-        detections: List[Tuple[Tuple[float, float], Tuple[float, float, float, float], str, float]],
-    ) -> Dict[int, TrackedObject]:
+        detections: List[DetectionInput],
+    ) -> TrackedObjects:
         """
         Update tracker state with a new set of detections.
 
@@ -129,9 +137,7 @@ class CentroidTracker:
         )
 
         # Compute pairwise distance matrix: (num_existing, num_new)
-        dist_matrix = self._compute_distance_matrix(
-            object_centroids, input_centroids
-        )
+        dist_matrix = self._compute_distance_matrix(object_centroids, input_centroids)
 
         # Greedy assignment: sort by distance, assign closest pairs first
         rows = dist_matrix.min(axis=1).argsort()
@@ -185,7 +191,7 @@ class CentroidTracker:
         self._next_object_id = 0
 
     @property
-    def objects(self) -> Dict[int, TrackedObject]:
+    def objects(self) -> TrackedObjects:
         """Read-only access to currently tracked objects."""
         return dict(self._objects)
 
@@ -217,9 +223,7 @@ class CentroidTracker:
         del self._objects[object_id]
 
     @staticmethod
-    def _compute_distance_matrix(
-        a: np.ndarray, b: np.ndarray
-    ) -> np.ndarray:
+    def _compute_distance_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
         Compute Euclidean distance matrix between two sets of 2D points.
 
@@ -232,12 +236,13 @@ class CentroidTracker:
         """
         # Efficient vectorized computation
         diff = a[:, np.newaxis, :] - b[np.newaxis, :, :]
-        return np.sqrt((diff ** 2).sum(axis=2))
+        return np.sqrt((diff**2).sum(axis=2))
 
 
 # =============================================================================
 # TrackerNode — ROS 2 Node
 # =============================================================================
+
 
 class TrackerNode(Node):
     """
@@ -268,69 +273,43 @@ class TrackerNode(Node):
 
     def __init__(self, **kwargs) -> None:
         """Initialize the tracker node with parameters and ROS interfaces."""
-        super().__init__('tracker_node', **kwargs)
+        super().__init__("tracker_node", **kwargs)
 
         # -----------------------------------------------------------------
         # Declare Parameters
         # -----------------------------------------------------------------
-        self.declare_parameter('tracking_target_class', 'person')
-        self.declare_parameter('tracker_type', 'centroid')
-        self.declare_parameter('image_width', 640)
-        self.declare_parameter('image_height', 480)
+        self.declare_parameter("tracking_target_class", "person")
+        self.declare_parameter("tracker_type", "centroid")
+        self.declare_parameter("image_width", 640)
+        self.declare_parameter("image_height", 480)
 
         # CentroidTracker parameters
-        self.declare_parameter('max_disappeared', 30)
-        self.declare_parameter('max_distance', 80.0)
+        self.declare_parameter("max_disappeared", 30)
+        self.declare_parameter("max_distance", 80.0)
 
         # ByteTrackTracker parameters
-        self.declare_parameter('track_high_thresh', 0.5)
-        self.declare_parameter('track_low_thresh', 0.1)
-        self.declare_parameter('match_thresh', 0.8)
+        self.declare_parameter("track_high_thresh", 0.5)
+        self.declare_parameter("track_low_thresh", 0.1)
+        self.declare_parameter("match_thresh", 0.8)
 
-        self._target_class: str = (
-            self.get_parameter('tracking_target_class')
-            .get_parameter_value().string_value
-        )
-        tracker_type: str = (
-            self.get_parameter('tracker_type')
-            .get_parameter_value().string_value
-        )
-        self._image_width: int = (
-            self.get_parameter('image_width')
-            .get_parameter_value().integer_value
-        )
-        self._image_height: int = (
-            self.get_parameter('image_height')
-            .get_parameter_value().integer_value
-        )
+        self._target_class = self._get_string_param("tracking_target_class")
+        tracker_type = self._get_string_param("tracker_type")
+        self._image_width = self._get_int_param("image_width")
+        self._image_height = self._get_int_param("image_height")
 
-        self.get_logger().info(f'Tracking target class: {self._target_class}')
-        self.get_logger().info(
-            f'Image size: {self._image_width}x{self._image_height}'
-        )
+        self.get_logger().info(f"Tracking target class: {self._target_class}")
+        self.get_logger().info(f"Image size: {self._image_width}x{self._image_height}")
 
         # -----------------------------------------------------------------
         # Initialize Tracker (Strategy Pattern)
         # -----------------------------------------------------------------
-        if tracker_type == 'bytetrack':
+        if tracker_type == "bytetrack":
             from yolo_rpi_core.bytetrack_tracker import ByteTrackTracker
 
-            track_high_thresh = (
-                self.get_parameter('track_high_thresh')
-                .get_parameter_value().double_value
-            )
-            track_low_thresh = (
-                self.get_parameter('track_low_thresh')
-                .get_parameter_value().double_value
-            )
-            match_thresh = (
-                self.get_parameter('match_thresh')
-                .get_parameter_value().double_value
-            )
-            max_lost = (
-                self.get_parameter('max_disappeared')
-                .get_parameter_value().integer_value
-            )
+            track_high_thresh = self._get_float_param("track_high_thresh")
+            track_low_thresh = self._get_float_param("track_low_thresh")
+            match_thresh = self._get_float_param("match_thresh")
+            max_lost = self._get_int_param("max_disappeared")
 
             self._tracker = ByteTrackTracker(
                 track_high_thresh=track_high_thresh,
@@ -339,26 +318,20 @@ class TrackerNode(Node):
                 max_lost=max_lost,
             )
             self.get_logger().info(
-                f'Tracker: ByteTrack (high={track_high_thresh}, '
-                f'low={track_low_thresh}, match={match_thresh})'
+                f"Tracker: ByteTrack (high={track_high_thresh}, "
+                f"low={track_low_thresh}, match={match_thresh})"
             )
         else:
-            max_disappeared = (
-                self.get_parameter('max_disappeared')
-                .get_parameter_value().integer_value
-            )
-            max_distance = (
-                self.get_parameter('max_distance')
-                .get_parameter_value().double_value
-            )
+            max_disappeared = self._get_int_param("max_disappeared")
+            max_distance = self._get_float_param("max_distance")
 
             self._tracker = CentroidTracker(
                 max_disappeared=max_disappeared,
                 max_distance=max_distance,
             )
             self.get_logger().info(
-                f'Tracker: Centroid (max_dist={max_distance}, '
-                f'max_disappeared={max_disappeared})'
+                f"Tracker: Centroid (max_dist={max_distance}, "
+                f"max_disappeared={max_disappeared})"
             )
 
         # -----------------------------------------------------------------
@@ -381,14 +354,14 @@ class TrackerNode(Node):
         # -----------------------------------------------------------------
         self._detection_sub = self.create_subscription(
             Detection2DArray,
-            '/yolo/detections',
+            "/yolo/detections",
             self._detection_callback,
             10,
         )
 
         self._image_sub = self.create_subscription(
             Image,
-            '/image_raw',
+            "/image_raw",
             self._image_callback,
             sensor_qos,
         )
@@ -398,30 +371,39 @@ class TrackerNode(Node):
         # -----------------------------------------------------------------
         self._command_pub = self.create_publisher(
             String,
-            '/tracking/command',
+            "/tracking/command",
             10,
         )
 
         self._debug_image_pub = self.create_publisher(
             Image,
-            '/tracking/debug_image',
+            "/tracking/debug_image",
             10,
         )
 
-        self.get_logger().info('TrackerNode initialized and ready!')
+        self.get_logger().info("TrackerNode initialized and ready!")
 
     # -----------------------------------------------------------------
     # Callbacks
     # -----------------------------------------------------------------
 
+    def _get_string_param(self, name: str) -> str:
+        return self.get_parameter(name).get_parameter_value().string_value
+
+    def _get_int_param(self, name: str) -> int:
+        return self.get_parameter(name).get_parameter_value().integer_value
+
+    def _get_float_param(self, name: str) -> float:
+        return self.get_parameter(name).get_parameter_value().double_value
+
     def _image_callback(self, msg: Image) -> None:
         """Cache the latest camera frame for debug image rendering."""
         try:
             self._latest_frame = self._bridge.imgmsg_to_cv2(
-                msg, desired_encoding='bgr8'
+                msg, desired_encoding="bgr8"
             )
         except Exception as e:
-            self.get_logger().error(f'Failed to convert image: {e}')
+            self.get_logger().error(f"Failed to convert image: {e}")
 
     def _detection_callback(self, msg: Detection2DArray) -> None:
         """
@@ -452,9 +434,7 @@ class TrackerNode(Node):
     # Detection Parsing
     # -----------------------------------------------------------------
 
-    def _parse_detections(
-        self, msg: Detection2DArray
-    ) -> List[Tuple[Tuple[float, float], Tuple[float, float, float, float], str, float]]:
+    def _parse_detections(self, msg: Detection2DArray) -> List[DetectionInput]:
         """
         Convert Detection2DArray into a list of (centroid, bbox, class, conf).
 
@@ -473,8 +453,7 @@ class TrackerNode(Node):
             confidence = hyp.hypothesis.score
 
             # Filter by target class (skip if not the class we want)
-            if (self._target_class != 'all'
-                    and class_name != self._target_class):
+            if self._target_class != "all" and class_name != self._target_class:
                 continue
 
             # Extract centroid and bbox from Detection2D
@@ -488,9 +467,7 @@ class TrackerNode(Node):
             x2 = cx + w / 2.0
             y2 = cy + h / 2.0
 
-            detections.append(
-                ((cx, cy), (x1, y1, x2, y2), class_name, confidence)
-            )
+            detections.append(((cx, cy), (x1, y1, x2, y2), class_name, confidence))
 
         return detections
 
@@ -499,7 +476,7 @@ class TrackerNode(Node):
     # -----------------------------------------------------------------
 
     def _select_primary_target(
-        self, tracked_objects: Dict[int, TrackedObject]
+        self, tracked_objects: TrackedObjects
     ) -> Optional[TrackedObject]:
         """
         Select the primary tracking target among all tracked objects.
@@ -518,7 +495,7 @@ class TrackerNode(Node):
         center_y = self._image_height / 2.0
 
         best_target: Optional[TrackedObject] = None
-        best_distance = float('inf')
+        best_distance = float("inf")
 
         for obj in tracked_objects.values():
             # Skip objects that have temporarily disappeared
@@ -539,9 +516,7 @@ class TrackerNode(Node):
     # Command Building
     # -----------------------------------------------------------------
 
-    def _build_tracking_command(
-        self, target: TrackedObject, header
-    ) -> String:
+    def _build_tracking_command(self, target: TrackedObject, header) -> String:
         """
         Build a JSON tracking command message.
 
@@ -577,16 +552,16 @@ class TrackerNode(Node):
         timestamp = header.stamp.sec + header.stamp.nanosec * 1e-9
 
         payload = {
-            'target_id': target.object_id,
-            'error_x': round(error_x, 4),
-            'error_y': round(error_y, 4),
-            'velocity_x': round(target.velocity[0], 2),
-            'velocity_y': round(target.velocity[1], 2),
-            'bbox_width': round(bbox_width, 1),
-            'bbox_height': round(bbox_height, 1),
-            'class_name': target.class_name,
-            'confidence': round(target.confidence, 3),
-            'timestamp': round(timestamp, 6),
+            "target_id": target.object_id,
+            "error_x": round(error_x, 4),
+            "error_y": round(error_y, 4),
+            "velocity_x": round(target.velocity[0], 2),
+            "velocity_y": round(target.velocity[1], 2),
+            "bbox_width": round(bbox_width, 1),
+            "bbox_height": round(bbox_height, 1),
+            "class_name": target.class_name,
+            "confidence": round(target.confidence, 3),
+            "timestamp": round(timestamp, 6),
         }
 
         msg = String()
@@ -597,9 +572,7 @@ class TrackerNode(Node):
     # Debug Image
     # -----------------------------------------------------------------
 
-    def _publish_debug_image(
-        self, tracked_objects: Dict[int, TrackedObject], header
-    ) -> None:
+    def _publish_debug_image(self, tracked_objects: TrackedObjects, header) -> None:
         """
         Render tracking overlay on the latest camera frame and publish.
 
@@ -639,43 +612,55 @@ class TrackerNode(Node):
                 end_x = int(cx + vx * arrow_scale)
                 end_y = int(cy + vy * arrow_scale)
                 cv2.arrowedLine(
-                    frame, (cx, cy), (end_x, end_y),
-                    (255, 255, 0), 2, tipLength=0.3,
+                    frame,
+                    (cx, cy),
+                    (end_x, end_y),
+                    (255, 255, 0),
+                    2,
+                    tipLength=0.3,
                 )
 
             # Label: ID + class + confidence
-            label = (
-                f'ID:{obj.object_id} {obj.class_name} '
-                f'{obj.confidence:.2f}'
-            )
+            label = f"ID:{obj.object_id} {obj.class_name} {obj.confidence:.2f}"
             cv2.putText(
-                frame, label, (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2,
+                frame,
+                label,
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                2,
             )
 
         # Draw image center crosshair
         cx_img = self._image_width // 2
         cy_img = self._image_height // 2
         cv2.drawMarker(
-            frame, (cx_img, cy_img), (0, 0, 255),
-            cv2.MARKER_CROSS, 20, 2,
+            frame,
+            (cx_img, cy_img),
+            (0, 0, 255),
+            cv2.MARKER_CROSS,
+            20,
+            2,
         )
 
         try:
-            debug_msg = self._bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+            debug_msg = self._bridge.cv2_to_imgmsg(frame, encoding="bgr8")
             debug_msg.header = header
             self._debug_image_pub.publish(debug_msg)
         except Exception as e:
-            self.get_logger().error(f'Failed to publish debug image: {e}')
+            self.get_logger().error(f"Failed to publish debug image: {e}")
 
 
 # =============================================================================
 # Entry Point
 # =============================================================================
 
+
 def main(args: Optional[List[str]] = None) -> None:
     """Entry point for the tracker node."""
     rclpy.init(args=args)
+    node: Optional[TrackerNode] = None
 
     try:
         node = TrackerNode()
@@ -683,10 +668,12 @@ def main(args: Optional[List[str]] = None) -> None:
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f'TrackerNode error: {e}')
+        print(f"TrackerNode error: {e}")
     finally:
+        if node is not None:
+            node.destroy_node()
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

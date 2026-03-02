@@ -84,14 +84,14 @@ class DummyActuatorNode(BaseActuatorNode):
     # -----------------------------------------------------------------
     # Configuration: simulated angle ranges
     # -----------------------------------------------------------------
-    PAN_RANGE_DEG: float = 90.0    # Max pan angle (degrees)
-    TILT_RANGE_DEG: float = 45.0   # Max tilt angle (degrees)
+    PAN_RANGE_DEG: float = 90.0  # Max pan angle (degrees)
+    TILT_RANGE_DEG: float = 45.0  # Max tilt angle (degrees)
 
     def __init__(self) -> None:
         """Initialize the dummy actuator node."""
         super().__init__(
-            node_name='dummy_actuator_node',
-            actuator_name='dummy_pan_tilt',
+            node_name="dummy_actuator_node",
+            actuator_name="dummy_pan_tilt",
         )
 
         # Simulated internal state
@@ -99,8 +99,8 @@ class DummyActuatorNode(BaseActuatorNode):
         self._current_tilt: float = 0.0
 
         self.get_logger().info(
-            '🤖 DummyActuatorNode ready — no real motors attached, '
-            'commands will be logged only.'
+            "🤖 DummyActuatorNode ready — no real motors attached, "
+            "commands will be logged only."
         )
 
     # =====================================================================
@@ -128,12 +128,12 @@ class DummyActuatorNode(BaseActuatorNode):
         Returns:
             True always (simulation never fails).
         """
-        error_x = command.get('error_x', 0.0)
-        error_y = command.get('error_y', 0.0)
-        target_id = command.get('target_id', -1)
-        class_name = command.get('class_name', 'unknown')
-        velocity_x = command.get('velocity_x', 0.0)
-        velocity_y = command.get('velocity_y', 0.0)
+        error_x = command.get("error_x", 0.0)
+        error_y = command.get("error_y", 0.0)
+        target_id = command.get("target_id", -1)
+        class_name = command.get("class_name", "unknown")
+        velocity_x = command.get("velocity_x", 0.0)
+        velocity_y = command.get("velocity_y", 0.0)
 
         # Compute simulated pan/tilt angles
         self._current_pan = error_x * self.PAN_RANGE_DEG
@@ -141,10 +141,10 @@ class DummyActuatorNode(BaseActuatorNode):
 
         # Log the simulated movement
         self.get_logger().info(
-            f'🎯 Tracking ID:{target_id} [{class_name}] | '
-            f'Pan: {self._current_pan:+6.1f}° | '
-            f'Tilt: {self._current_tilt:+5.1f}° | '
-            f'Velocity: ({velocity_x:+.1f}, {velocity_y:+.1f}) px/f'
+            f"🎯 Tracking ID:{target_id} [{class_name}] | "
+            f"Pan: {self._current_pan:+6.1f}° | "
+            f"Tilt: {self._current_tilt:+5.1f}° | "
+            f"Velocity: ({velocity_x:+.1f}, {velocity_y:+.1f}) px/f"
         )
 
         return True
@@ -161,9 +161,7 @@ class DummyActuatorNode(BaseActuatorNode):
         self._current_pan = 0.0
         self._current_tilt = 0.0
 
-        self.get_logger().info(
-            '🛑 STOP — Pan/Tilt reset to (0°, 0°)'
-        )
+        self.get_logger().info("🛑 STOP — Pan/Tilt reset to (0°, 0°)")
 
     # =====================================================================
     # Optional Overrides (demonstration)
@@ -179,9 +177,7 @@ class DummyActuatorNode(BaseActuatorNode):
             - Serial port connection
             - Homing/calibration routine
         """
-        self.get_logger().info(
-            '⚙️ Startup: Dummy actuator — no hardware to initialize'
-        )
+        self.get_logger().info("⚙️ Startup: Dummy actuator — no hardware to initialize")
 
     def _on_state_change(
         self,
@@ -197,24 +193,24 @@ class DummyActuatorNode(BaseActuatorNode):
             - Disable motors when IDLE
         """
         state_icons = {
-            ActuatorState.IDLE: '💤',
-            ActuatorState.TRACKING: '🏃',
-            ActuatorState.ERROR: '❌',
+            ActuatorState.IDLE: "💤",
+            ActuatorState.TRACKING: "🏃",
+            ActuatorState.ERROR: "❌",
         }
 
-        icon = state_icons.get(new_state, '❓')
-        self.get_logger().info(
-            f'{icon} State: {old_state.value} → {new_state.value}'
-        )
+        icon = state_icons.get(new_state, "❓")
+        self.get_logger().info(f"{icon} State: {old_state.value} → {new_state.value}")
 
 
 # =============================================================================
 # Entry Point
 # =============================================================================
 
+
 def main(args: Optional[List[str]] = None) -> None:
     """Entry point for the dummy actuator node."""
     rclpy.init(args=args)
+    node: Optional[DummyActuatorNode] = None
 
     try:
         node = DummyActuatorNode()
@@ -222,10 +218,12 @@ def main(args: Optional[List[str]] = None) -> None:
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f'DummyActuatorNode error: {e}')
+        print(f"DummyActuatorNode error: {e}")
     finally:
+        if node is not None:
+            node.destroy_node()
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
